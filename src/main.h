@@ -8,6 +8,10 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h> 
+#include <string.h>
 
 void setupPorts();
 void setupTimer0();
@@ -15,8 +19,10 @@ void setupTimer1();
 void setupExternalInterrupt();
 void initUART();
 void printResetSource();
-void UART_send(char data);
+//void UART_send(char data);
 void UART_sendString(const char* str);
-void UART_sendNumber(uint8_t num);
+void UART_sendNumber(uint16_t num);
+void UART_send(uint8_t *buf, uint16_t size);
+void UART_sendFrequency(uint16_t freq_x10);
 
 #endif // __MAIN_H__

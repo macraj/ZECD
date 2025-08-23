@@ -14,7 +14,9 @@ uint8_t outageDuration = NONE;
 volatile uint16_t pulseCount = 0;
 volatile uint8_t secondsCounter = 0;
 volatile uint8_t measurementReady = 0;
-
+// Variables for interrupt handling
+volatile bool send_busy = false;
+volatile uint8_t *send_p, *send_e;
 
 int main(void) {
     // Initialize UART for serial communication
@@ -167,23 +169,23 @@ void checkAllResetSources(void) {
 }
 
 
-/* Send a single character via UART */
+/* Send a single character via UART 
 void UART_send(char data) {
     // Wait for empty transmit buffer
     while (!(UCSR0A & (1 << UDRE0)));
     
     // Put data into buffer, sends the data
     UDR0 = data;
-}
+} */
 
 // Send a string via UART
-void UART_sendString(const char* str) {
-    while (*str) {
-        UART_send(*str++);
-    }
-  }
+// void UART_sendString(const char* str) {
+//     while (*str) {
+//         UART_send(*str++);
+//     }
+//   }
 
-/* Convert number to string and send via UART */
+/* Convert number to string and send via UART 
 void UART_sendNumber(uint8_t num) {
     if (num >= 100) {
         UART_send('0' + num / 100);
@@ -195,9 +197,30 @@ void UART_sendNumber(uint8_t num) {
     } else {
         UART_send('0' + num);
     }
+} */
+void UART_sendNumber(uint16_t num) {
+    char buffer[10]; // Wystarczający rozmiar dla większości liczb
+    
+    // Konwertuje liczbę na string
+    snprintf(buffer, sizeof(buffer), "%u", num);
+    
+    // Wysyła cały string za pomocą nieblokującej funkcji
+    UART_send((uint8_t*)buffer, strlen(buffer));
 }
 
-/* Send frequency with one decimal place */
+void UART_sendString(const char* str) {
+    UART_send((uint8_t*)str, strlen(str));
+}
+
+/* Multi-byte send function */
+void UART_send(uint8_t *buf, uint16_t size){
+    while (send_busy);
+    send_busy = true;
+    send_p = buf;
+    send_e = buf + size;
+    UCSR0B |= (1 << UDRIE0);
+}
+/* Send frequency with one decimal place 
 void UART_sendFrequency(uint16_t freq_x10) {
     uint16_t integerPart = freq_x10 / 10;
     uint8_t fractionalPart = freq_x10 % 10;
@@ -207,8 +230,19 @@ void UART_sendFrequency(uint16_t freq_x10) {
     UART_send('.');
     UART_send('0' + fractionalPart);
     UART_sendString(" Hz\r\n");
+} */
+void UART_sendFrequency(uint16_t freq_x10) {
+    uint16_t integerPart = freq_x10 / 10;
+    uint8_t fractionalPart = freq_x10 % 10;
+    
+    char buffer[20]; // Bufor na cały komunikat
+    
+    // Tworzy sformatowany łańcuch znaków
+    snprintf(buffer, sizeof(buffer), "Frequency: %u.%u Hz\r\n", integerPart, fractionalPart);
+    
+    // Wysyła całą wiadomość jednocześnie
+    UART_send((uint8_t*)buffer, strlen(buffer));
 }
-
 /* Timer1 interrupt service routine */
 ISR(TIMER1_COMPA_vect) {
   secondsCounter++; // Increment seconds counter
@@ -232,3 +266,12 @@ ISR(TIMER0_COMPA_vect) {
   if (!(PIND & (1 << PULSE_PIN))) pulseCount++; // Valid pulse detected
   EIMSK = (1 << INT0); // Re-enable INT0 interrupt  
 } 
+ 
+// USART Data Register Empty interrupt for ATmega328P
+ISR(USART_UDRE_vect){
+    UDR0 = *send_p++;
+    if (send_p == send_e){
+        UCSR0B &= ~(1 << UDRIE0);
+        send_busy = false;
+    }
+}
