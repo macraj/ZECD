@@ -38,8 +38,8 @@ int main(void) {
 
     while (1) {
         // Main loop
-        PINB |= (1<<PB5); // Toggle LED on PB5
-        _delay_ms(500); // Wait for 500 milliseconds
+        if (secondsCounter % 2 == 0) PINB |= (1 << PB5);    // Toggle LED every 2 seconds
+        
         if (measurementReady) {
             measurementReady = 0; // Clear the flag
 
@@ -77,7 +77,7 @@ void setupTimer0() {
   // CTC
   TCCR0A |= (1 << WGM01);
   // Prescaler 64
-  // TCCR0B |= (1 << CS01) | (1 << CS00);
+  // TCCR0B |= (1 << CS01) | (1 << CS00); // Start Timer0 later in INT0
   // Output Compare Match A Interrupt Enable
   TIMSK0 |= (1 << OCIE0A);
 }
@@ -151,61 +151,18 @@ void printResetSource() {
     MCUSR = 0;
 }
 
-    
-
-void checkAllResetSources(void) {
-    uint8_t resetSource = MCUSR;
-    
-    UART_sendString("Reset sources: ");
-    
-    if (resetSource & (1 << PORF)) UART_sendString("POR ");
-    if (resetSource & (1 << EXTRF)) UART_sendString("EXT ");
-    if (resetSource & (1 << BORF)) UART_sendString("BOR ");
-    if (resetSource & (1 << WDRF)) UART_sendString("WDT ");
-    
-    UART_sendString("\r\n");
-    
-    MCUSR = 0;
-}
-
-
-/* Send a single character via UART 
-void UART_send(char data) {
-    // Wait for empty transmit buffer
-    while (!(UCSR0A & (1 << UDRE0)));
-    
-    // Put data into buffer, sends the data
-    UDR0 = data;
-} */
-
-// Send a string via UART
-// void UART_sendString(const char* str) {
-//     while (*str) {
-//         UART_send(*str++);
-//     }
-//   }
-
-/* Convert number to string and send via UART 
-void UART_sendNumber(uint8_t num) {
-    if (num >= 100) {
-        UART_send('0' + num / 100);
-        UART_send('0' + (num % 100) / 10);
-        UART_send('0' + num % 10);
-    } else if (num >= 10) {
-        UART_send('0' + num / 10);
-        UART_send('0' + num % 10);
-    } else {
-        UART_send('0' + num);
-    }
-} */
 void UART_sendNumber(uint16_t num) {
-    char buffer[10]; // Wystarczający rozmiar dla większości liczb
-    
-    // Konwertuje liczbę na string
-    snprintf(buffer, sizeof(buffer), "%u", num);
-    
-    // Wysyła cały string za pomocą nieblokującej funkcji
-    UART_send((uint8_t*)buffer, strlen(buffer));
+    char buffer[10]; // Maximum 5 digits for uint16_t + null terminator
+    char *p = &buffer[sizeof(buffer) - 1]; // Pointer to the end of the buffer
+    *p = '\0'; // Null-terminate the string
+
+    do {
+        *(--p) = (num % 10) + '0'; // Convert digit to character
+        num /= 10;
+    } while (num != 0);
+
+    // Send the string
+    UART_send((uint8_t*)p, strlen(p));
 }
 
 void UART_sendString(const char* str) {
@@ -220,29 +177,47 @@ void UART_send(uint8_t *buf, uint16_t size){
     send_e = buf + size;
     UCSR0B |= (1 << UDRIE0);
 }
-/* Send frequency with one decimal place 
+
 void UART_sendFrequency(uint16_t freq_x10) {
-    uint16_t integerPart = freq_x10 / 10;
-    uint8_t fractionalPart = freq_x10 % 10;
-    
-    UART_sendString("Frequency: ");
-    UART_sendNumber(integerPart);
-    UART_send('.');
-    UART_send('0' + fractionalPart);
-    UART_sendString(" Hz\r\n");
-} */
-void UART_sendFrequency(uint16_t freq_x10) {
-    uint16_t integerPart = freq_x10 / 10;
-    uint8_t fractionalPart = freq_x10 % 10;
-    
     char buffer[20]; // Bufor na cały komunikat
+    char *p = buffer; // Wskaźnik na początek bufora
     
-    // Tworzy sformatowany łańcuch znaków
-    snprintf(buffer, sizeof(buffer), "Frequency: %u.%u Hz\r\n", integerPart, fractionalPart);
+    // Step 1: Copy "Frequency: "
+    const char *prefix = "Frequency: ";
+    while (*prefix) {
+        *p++ = *prefix++;
+    }
     
-    // Wysyła całą wiadomość jednocześnie
-    UART_send((uint8_t*)buffer, strlen(buffer));
+    // Step 2: Convert integer part to string
+    uint16_t integerPart = freq_x10 / 10;
+    char temp_num_buf[6]; // Bufor tymczasowy
+    char *temp_p = &temp_num_buf[sizeof(temp_num_buf) - 1];
+    *temp_p = '\0';
+    
+    do {
+        *(--temp_p) = (integerPart % 10) + '0';
+        integerPart /= 10;
+    } while (integerPart != 0);
+
+    while (*temp_p) {
+        *p++ = *temp_p++;
+    }
+    
+    // Step 3: Add decimal point and fractional part
+    *p++ = '.';
+    uint8_t fractionalPart = freq_x10 % 10;
+    *p++ = fractionalPart + '0';
+    
+    // Step 4: Add " Hz\r\n"
+    const char *suffix = " Hz\r\n";
+    while (*suffix) {
+        *p++ = *suffix++;
+    }
+    
+    // Send the complete message
+    UART_send((uint8_t*)buffer, p - buffer);
 }
+
 /* Timer1 interrupt service routine */
 ISR(TIMER1_COMPA_vect) {
   secondsCounter++; // Increment seconds counter
